@@ -29,67 +29,93 @@ import org.xml.sax.InputSource;
 import org.xml.sax.SAXException;
 
 /**
- *
+ * Java class to retrieve the list of chemical or drug data deposited in WIKIPEDIA
+ * It recursively checks for the chemical/ drug data and if found saves it the repo.
+ * data stored contains the Name, PageID, Chemical/Drug data (ChemBox/ Drug Box Details)
  * @author CS76
  */
 public class WikiChemDataScrapper {
 
     public static void main(String[] args) throws Exception {
+        String rootCategory = "Organic compounds";
         WikiChemDataScrapper wcds = new WikiChemDataScrapper();
-        wcds.recDataFetcher("Alcohols");
+        wcds.recursiveDataFetcher(rootCategory);
     }
 
-    private void recDataFetcher(String query) throws Exception {
-//        System.out.println("CAtegory:::" + query);
-//        List<String> subCat = this.querySubCat(query);
-//        if (subCat.size() > 0) {
-//            for (String s : subCat) {
-//                recDataFetcher(s);
-//            }
-//        }
+    /**
+     * Recursively Checks for the Chemical or Drug data and if found stores to a repo
+     * @param query
+     * @throws Exception
+     */
+    private void recursiveDataFetcher(String query) throws Exception {
+        // getList of SubCategories in the give query category
+        // ----> handles even if the list of subcategories are greater than 500.
+        List<String> subCatList = this.querySubCat(query, null, "");
+        if (subCatList.size() > 0) {
+            System.out.println("SubCategories :: " + subCatList.size() + " ==== " + query);
+            for (String subCategory : subCatList) {
+                recursiveDataFetcher(subCategory);
+            }
+        }
+        // getList of Pages in the give query category
+        // ----> handles even if the list of pages are greater than 500.
         List<String> pages = this.queryPage(query, null, "");
-        System.out.println(pages);
         if (pages.size() > 0) {
-            System.out.println(pages.size() + " ==== " + query);
+            System.out.println("Pages :: " + pages.size() + " ==== " + query);
+            // loop through each page and find out if it belong to a chemical or drug category
+            // --> if TRUE -> append to the repo
             for (String p : pages) {
                 List<String> chemData = this.fetchChemCompDetails(p);
                 if (chemData.size() > 0) {
                     StringBuilder sbn = new StringBuilder();
                     for (String data : chemData) {
-                        // System.out.println("Page:: " + data);
                         sbn.append(data).append("\t");
                     }
                     sbn.append("\n");
+                    // append data to a text file (tab delimited)
                     GeneralUtility.appendToFile(sbn.toString(), "C:\\Users\\CS76\\Desktop\\dataWiki.txt");
                 }
             }
         }
     }
 
-    private List<String> queryPage(String queryString1, List<String> pagesList, String cmCont) {
+    /**
+     * Gets a list of pages in the give Query
+     * @param catgeoryQuery
+     * @param pagesList
+     * @param cmCont
+     * @return
+     */
+    private List<String> queryPage(String catgeoryQuery, List<String> pagesList, String cmCont) throws Exception {
         String action = "query";
         String list = "categorymembers";
-        String searchTerm = queryString1.replace("Category:", "").replace(" ", "%20");
+        String searchTerm = catgeoryQuery.replace("Category:", "").replace(" ", "%20");
         String cmtitle = "Category:" + searchTerm;
         String cmlimit = "max";
         String cmtype = "page";
         String format = "xml";
         String cmprop = "type|title";
-        String qc = "";
-        Boolean cmContinue = false;
+        String pageCmCont = "";
+
+        Boolean cmContinueStatus = false;
+
         List<String> pageResults = new ArrayList<String>();
-        String URLQuery = "";
+        String URLString = "";
+
+
+        // checks if the query if for cmcontinue or a direct query and assigns the purticular url to URLString
+        // intializes the corresponding variables accordingly
         if (pagesList == null && cmCont == "") {
-            URLQuery = "http://en.wikipedia.org/w/api.php?action=" + action + "&list=" + list + "&cmtitle=" + cmtitle + "&cmlimit=" + cmlimit + "&cmtype=" + cmtype + "&cmprop=" + cmprop + "&format=" + format;
+            URLString = "http://en.wikipedia.org/w/api.php?action=" + action + "&list=" + list + "&cmtitle=" + cmtitle + "&cmlimit=" + cmlimit + "&cmtype=" + cmtype + "&cmprop=" + cmprop + "&format=" + format;
         } else if ((pagesList != null && cmCont != "")) {
             pageResults = pagesList;
-            URLQuery = "http://en.wikipedia.org/w/api.php?action=" + action + "&list=" + list + "&cmtitle=" + cmtitle + "&cmlimit=" + cmlimit + "&cmtype=" + cmtype + "&cmprop=" + cmprop + "&format=" + format + "&cmcontinue=" + cmCont;
+            URLString = "http://en.wikipedia.org/w/api.php?action=" + action + "&list=" + list + "&cmtitle=" + cmtitle + "&cmlimit=" + cmlimit + "&cmtype=" + cmtype + "&cmprop=" + cmprop + "&format=" + format + "&cmcontinue=" + cmCont;
         }
-        StringBuilder sb = new StringBuilder();
 
+        StringBuilder sb = new StringBuilder();
         try {
-            URL wiki = new URL(URLQuery);
-            URLConnection wikic = wiki.openConnection();
+            URL wikiURL = new URL(URLString);
+            URLConnection wikic = wikiURL.openConnection();
             BufferedReader in = new BufferedReader(new InputStreamReader(wikic.getInputStream()));
             String inputLine;
             while ((inputLine = in.readLine()) != null) {
@@ -100,26 +126,25 @@ public class WikiChemDataScrapper {
             System.out.println("Error in querying wiki:" + e.getMessage());
             return null;
         }
+
         DocumentBuilderFactory dbFactory = DocumentBuilderFactory.newInstance();
         DocumentBuilder dBuilder;
         NodeList nList = null, cmContM = null;
         try {
             dBuilder = dbFactory.newDocumentBuilder();
-            Document doc = dBuilder.parse(new InputSource(new ByteArrayInputStream(sb.toString().getBytes("utf-8"))));
+            Document doc = loadXMLFromString(sb.toString());
             doc.getDocumentElement().normalize();
+
             nList = doc.getElementsByTagName("cm");
 
             cmContM = doc.getElementsByTagName("query-continue");
             if (cmContM.getLength() > 0) {
-                cmContinue = true;
-                qc = (cmContM.item(0).getFirstChild().getAttributes().getNamedItem("cmcontinue").getTextContent());
+                cmContinueStatus = true;
+                pageCmCont = (cmContM.item(0).getFirstChild().getAttributes().getNamedItem("cmcontinue").getTextContent());
             }
-
-        } catch (ParserConfigurationException ex) {
+        } catch (ParserConfigurationException | SAXException ex) {
             Logger.getLogger(WikiChemDataScrapper.class.getName()).log(Level.SEVERE, null, ex);
         } catch (UnsupportedEncodingException ex) {
-            Logger.getLogger(WikiChemDataScrapper.class.getName()).log(Level.SEVERE, null, ex);
-        } catch (SAXException ex) {
             Logger.getLogger(WikiChemDataScrapper.class.getName()).log(Level.SEVERE, null, ex);
         } catch (IOException ex) {
             Logger.getLogger(WikiChemDataScrapper.class.getName()).log(Level.SEVERE, null, ex);
@@ -132,22 +157,41 @@ public class WikiChemDataScrapper {
                 pageResults.add(eElement.getAttribute("title"));
             }
         }
-        if (cmContinue) {
-           pageResults = queryPage(queryString1, pageResults,qc);
+        if (cmContinueStatus) {
+            pageResults = queryPage(catgeoryQuery, pageResults, pageCmCont);
         }
         return pageResults;
     }
-
-    private List<String> querySubCat(String queryString1) throws Exception {
+    
+    /**
+     * Gets a list of subCategories in the give Query
+     * @param queryString1
+     * @param catList
+     * @param cmCatCont
+     * @return
+     * @throws Exception 
+     */
+    private List<String> querySubCat(String catgeoryQuery, List<String> catList, String cmCatCont) throws Exception {
         String action = "query";
         String list = "categorymembers";
-        String searchTerm = queryString1.replace("Category:", "").replace(" ", "%20");
+        String searchTerm = catgeoryQuery.replace("Category:", "").replace(" ", "%20");
         String cmtitle = "Category:" + searchTerm;
         String cmlimit = "max";
         String cmtype = "subcat";
         String format = "xml";
         String cmprop = "type|title";
-        String URLQuery = "http://en.wikipedia.org/w/api.php?action=" + action + "&list=" + list + "&cmtitle=" + cmtitle + "&cmlimit=" + cmlimit + "&cmtype=" + cmtype + "&cmprop=" + cmprop + "&format=" + format;
+        String URLQuery = "";
+        String catCmCont = "";
+
+        Boolean cmContinue = false;
+        List<String> subCatResults = new ArrayList<String>();
+
+        if (catList == null && cmCatCont == "") {
+            URLQuery = "http://en.wikipedia.org/w/api.php?action=" + action + "&list=" + list + "&cmtitle=" + cmtitle + "&cmlimit=" + cmlimit + "&cmtype=" + cmtype + "&cmprop=" + cmprop + "&format=" + format;
+        } else if ((catList != null && cmCatCont != "")) {
+            subCatResults = catList;
+            URLQuery = "http://en.wikipedia.org/w/api.php?action=" + action + "&list=" + list + "&cmtitle=" + cmtitle + "&cmlimit=" + cmlimit + "&cmtype=" + cmtype + "&cmprop=" + cmprop + "&format=" + format + "&cmcontinue=" + cmCatCont;
+        }
 
         StringBuilder sbc = new StringBuilder();
         try {
@@ -166,39 +210,50 @@ public class WikiChemDataScrapper {
 
         DocumentBuilderFactory dbFactory = DocumentBuilderFactory.newInstance();
         DocumentBuilder dBuilder;
-        NodeList nList = null;
+        NodeList nList = null, cmContM = null;
         try {
             dBuilder = dbFactory.newDocumentBuilder();
             Document doc = loadXMLFromString(sbc.toString());
             doc.getDocumentElement().normalize();
             nList = doc.getElementsByTagName("cm");
-        } catch (ParserConfigurationException ex) {
+
+            cmContM = doc.getElementsByTagName("query-continue");
+            if (cmContM.getLength() > 0) {
+                cmContinue = true;
+                catCmCont = (cmContM.item(0).getFirstChild().getAttributes().getNamedItem("cmcontinue").getTextContent());
+            }
+        } catch (ParserConfigurationException | SAXException ex) {
             Logger.getLogger(WikiChemDataScrapper.class.getName()).log(Level.SEVERE, null, ex);
         } catch (UnsupportedEncodingException ex) {
-            Logger.getLogger(WikiChemDataScrapper.class.getName()).log(Level.SEVERE, null, ex);
-        } catch (SAXException ex) {
             Logger.getLogger(WikiChemDataScrapper.class.getName()).log(Level.SEVERE, null, ex);
         } catch (IOException ex) {
             Logger.getLogger(WikiChemDataScrapper.class.getName()).log(Level.SEVERE, null, ex);
         }
 
-        List<String> subCatResults = new ArrayList<String>();
-
         for (int i = 0; i < nList.getLength(); i++) {
-
             Node nNode = nList.item(i);
             if (nNode.getNodeType() == Node.ELEMENT_NODE) {
                 Element eElement = (Element) nNode;
                 subCatResults.add(eElement.getAttribute("title"));
             }
         }
+
+        if (cmContinue) {
+            subCatResults = queryPage(catgeoryQuery, subCatResults, catCmCont);
+        }
         return subCatResults;
     }
-
-    private List<String> fetchChemCompDetails(String queryString1) throws Exception {
-        System.out.println(queryString1);
+   
+    /**
+     * Gets a data from a query Page if it belongs to chemical or drug category else returns a null List
+     * @param queryString1
+     * @return
+     * @throws Exception 
+     */
+    private List<String> fetchChemCompDetails(String pageQuery) throws Exception {
+        System.out.println(pageQuery);
         String action = "query";
-        String searchTerm = queryString1.replace(" ", "%20");
+        String searchTerm = pageQuery.replace(" ", "%20");
         String titles = "API|" + searchTerm;
         String prop = "revisions";
         String rvprop = "timestamp|user|comment|content";
@@ -218,7 +273,6 @@ public class WikiChemDataScrapper {
             System.out.println("Error in querying wiki:" + e.getMessage());
             return null;
         }
-
         DocumentBuilderFactory dbFactory = DocumentBuilderFactory.newInstance();
         DocumentBuilder dBuilder;
         NodeList nList = null;
@@ -227,11 +281,9 @@ public class WikiChemDataScrapper {
             Document doc = loadXMLFromString(sb.toString());
             doc.getDocumentElement().normalize();
             nList = doc.getElementsByTagName("page");
-        } catch (ParserConfigurationException ex) {
+        } catch (ParserConfigurationException | SAXException ex) {
             Logger.getLogger(WikiChemDataScrapper.class.getName()).log(Level.SEVERE, null, ex);
         } catch (UnsupportedEncodingException ex) {
-            Logger.getLogger(WikiChemDataScrapper.class.getName()).log(Level.SEVERE, null, ex);
-        } catch (SAXException ex) {
             Logger.getLogger(WikiChemDataScrapper.class.getName()).log(Level.SEVERE, null, ex);
         } catch (IOException ex) {
             Logger.getLogger(WikiChemDataScrapper.class.getName()).log(Level.SEVERE, null, ex);
@@ -241,11 +293,11 @@ public class WikiChemDataScrapper {
             Node nNode = nList.item(i);
             if (nNode.getNodeType() == Node.ELEMENT_NODE) {
                 Element eElement = (Element) nNode;
-                if (eElement.getAttribute("title").equalsIgnoreCase(queryString1)) {
+                if (eElement.getAttribute("title").equalsIgnoreCase(pageQuery)) {
                     String content = eElement.getElementsByTagName("rev").item(0).getTextContent();
-                    String mBoxData = splitString(content, "'''" + queryString1 + "'''").get(0);
+                    String mBoxData = splitString(content, "'''" + pageQuery + "'''").get(0);
                     if (mBoxData.contains("drugbox") || mBoxData.contains("chembox") || mBoxData.contains("Drugbox") || mBoxData.contains("Chembox")) {
-                        ChemCompoundData.add(queryString1);
+                        ChemCompoundData.add(pageQuery);
                         ChemCompoundData.add(eElement.getAttribute("pageid"));
                         ChemCompoundData.add(mBoxData);
                     }
@@ -254,13 +306,25 @@ public class WikiChemDataScrapper {
         }
         return ChemCompoundData;
     }
-
+    
+    /**
+     * Splits the word using the given split String and return back the list of strings
+     * @param word
+     * @param splitWord
+     * @return 
+     */
     public List<String> splitString(String word, String splitWord) {
         String[] wordArray = word.split(splitWord);
         List<String> wordList = Arrays.asList(wordArray);
         return wordList;
     }
-
+    
+    /**
+     * returns document from the xml string
+     * @param xml
+     * @return
+     * @throws Exception 
+     */
     public Document loadXMLFromString(String xml) throws Exception {
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
         DocumentBuilder builder = factory.newDocumentBuilder();
